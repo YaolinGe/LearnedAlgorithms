@@ -28,7 +28,7 @@ class RRT(object):
         self.max_rand = rand_area[1]
         self.expandDis = 1.0
         self.goalSampleRate = .05
-        self.maxIter = 500
+        self.maxIter = 10
         self.obstacleList = obstacle_list
         self.nodeList = [self.start]
         # self.start.show_node()
