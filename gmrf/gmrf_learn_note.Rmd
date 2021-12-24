@@ -1,0 +1,19 @@
+---
+title: "gmrf_note"
+author: "Yaolin Ge"
+date: "12/21/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Linear algebra
+```{r, tidy = TRUE, tidy.opts = list(comment = FALSE)}
+a = matrix(rnorm(36), nrow = 6)  
+print(det(a))
+ev = eigen(a)$values
+
+```
+
