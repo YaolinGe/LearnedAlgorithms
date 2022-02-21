@@ -93,9 +93,67 @@ def print_result(start_node, end_node, shortest_path, previous_nodes):
 
 print_result("Reykjavik", "Belgrade", shortestpath, previous_nodes)
 
+#%%
+
+# importing "itertools" for iterator operations
+import itertools
+
+# initializing list
+li = [2, 4, 6, 7, 8, 10, 20]
+
+# storing list in iterator
+iti = iter(li)
 
 
+# using tee() to make a list of iterators
+# makes list of 3 iterators having same values.
+it = itertools.tee(iti, 3)
+# print(list(it[1]))
 
+# printing the values of iterators
+print("The iterators are : ")
+for i in range(0, 3):
+    print(list(it[i]))
+
+print(it)
+print(list(it[0]))
+
+#%%
+
+marks = [65, 71, 68, 74, 61]
+
+# convert list to iterator
+iterator_marks = iter(marks)
+print(iterator_marks)
+
+# the next element is the first element
+marks_1 = next(iterator_marks)
+print(marks_1)
+
+# find the next element which is the second element
+marks_2 = next(iterator_marks)
+print(marks_2)
+
+# Output: 65
+#         71
+#%%
+languages = ['Java', 'Python', 'JavaScript', "test"]
+versions = [14, 3, 6, 6]
+
+result = zip(languages, versions)
+print(list(result))
+
+# Output: [('Java', 14), ('Python', 3), ('JavaScript', 6)]
+import numpy as np
+t1 = np.random.rand(3, 1)
+t2 = np.random.rand(3, 1)
+t = zip(t1, t2)
+print(t1, t2)
+# print(t)
+# print(list(t))
+
+for key, value in t:
+    print(key, value)
 
 
 

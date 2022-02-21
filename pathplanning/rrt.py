@@ -24,11 +24,17 @@ class RRT(object):
     def __init__(self, start, goal, obstacle_list, rand_area):
         self.start = Node(start[0], start[1])
         self.end = Node(goal[0], goal[1])
+
         self.min_rand = rand_area[0]
         self.max_rand = rand_area[1]
+
         self.expandDis = 1.0
         self.goalSampleRate = .05
-        self.maxIter = 10
+
+
+        self.maxIter = 1000
+
+
         self.obstacleList = obstacle_list
         self.nodeList = [self.start]
         # self.start.show_node()
@@ -178,7 +184,8 @@ def main():
 
     if show_animation:
         plt.close()
-        rrt.draw_static(path)
+        rrt.draw_graph()
+        # rrt.draw_static(path)
 
 if __name__ == "__main__":
     main()
