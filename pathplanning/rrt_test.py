@@ -7,12 +7,19 @@ Date: 2022-02-17
 
 import numpy as np
 import matplotlib.pyplot as plt
-MAXNUM = 3000
+from shapely.geometry import Point, Polygon, LineString
+
+MAXNUM = 500
 XLIM = [0, 1]
 YLIM = [0, 1]
 GOAL_SAMPLE_RATE = .01
-STEP = .01
+STEP = .1
 DISTANCE_TOLERANCE = .05
+OBSTACLES = [[[.1, .1], [.2, .1], [.2, .2], [.1, .2]],
+             [[.4, .4], [.6, .5], [.5, .6], [.3, .4]],
+             [[.8, .8], [.95, .8], [.95, .95], [.8, .95]]]
+
+FIGPATH = "/Users/yaoling/OneDrive - NTNU/Self-improvements/LearnedAlgorithms/pathplanning/fig/rrt/"
 
 
 class Location:
@@ -44,6 +51,8 @@ class RRTConfig:
 class RRT:
 
     nodes = []
+    obstacles = np.array(OBSTACLES)
+    polygon_obstacles = []
 
     def __init__(self, config=None):
         self.config = config
@@ -63,13 +72,29 @@ class RRT:
 
             nearest_node = self.get_nearest_node(self.nodes, new_location)
             next_node = self.get_next_node(nearest_node, new_location)
+
+            if self.iscollided(next_node):
+                continue
             if self.isarrived(next_node):
                 self.ending_node.parent = next_node
                 self.nodes.append(self.ending_node)
                 break
             else:
                 self.nodes.append(next_node)
-            pass
+
+            # plt.clf()
+            # for j in range(self.obstacles.shape[0]):
+            #     obstacle = np.append(self.obstacles[j], self.obstacles[j][0, :].reshape(1, -1), axis=0)
+            #     plt.plot(obstacle[:, 0], obstacle[:, 1], 'r-.')
+            #
+            # for node in self.nodes:
+            #     if node.parent is not None:
+            #         plt.plot([node.location.x, node.parent.location.x],
+            #                  [node.location.y, node.parent.location.y], "-g")
+            # plt.plot(self.config.starting_location.x, self.config.starting_location.y, 'k*', ms=10)
+            # plt.plot(self.config.ending_location.x, self.config.ending_location.y, 'g*', ms=10)
+            # plt.grid()
+            # plt.savefig(FIGPATH+"P_{:03d}.png".format(i))
         pass
 
     @staticmethod
@@ -84,7 +109,7 @@ class RRT:
         node_new = TreeNode(location)
         for node in nodes:
             dist.append(self.get_distance_between_nodes(node, node_new))
-        return self.nodes[dist.index(min(dist))]
+        return nodes[dist.index(min(dist))]
 
     @staticmethod
     def get_distance_between_nodes(node1, node2):
@@ -107,14 +132,20 @@ class RRT:
         else:
             return False
 
-    def iscollided(self):
-        #TODO: use shapely to add intersect collision avoidance
-        """
-        - Check if point is inside polygon
-        - check line intersect
+    def set_obstacles(self):
+        for i in range(self.obstacles.shape[0]):
+            self.polygon_obstacles.append(Polygon(list(map(tuple, self.obstacles[i]))))
 
-        """
-        pass
+    def iscollided(self, node):
+        point = Point(node.location.x, node.location.y)
+        line = LineString([(node.parent.location.x, node.parent.location.y),
+                           (node.location.x, node.location.y)])
+        collision = False
+        for i in range(len(self.polygon_obstacles)):
+            if self.polygon_obstacles[i].contains(point) or self.polygon_obstacles[i].intersects(line):
+                # print("Collision detected")
+                collision = True
+        return collision
 
     def get_shortest_path(self):
         self.path.append([self.ending_node.location.x, self.ending_node.location.y])
@@ -131,83 +162,33 @@ class RRT:
     def plot_tree(self):
 
         plt.clf()
+        for i in range(self.obstacles.shape[0]):
+            obstacle = np.append(self.obstacles[i], self.obstacles[i][0, :].reshape(1, -1), axis=0)
+            plt.plot(obstacle[:, 0], obstacle[:, 1], 'r-.')
+
         for node in self.nodes:
             if node.parent is not None:
                 plt.plot([node.location.x, node.parent.location.x],
                          [node.location.y, node.parent.location.y], "-g")
         path = np.array(self.path)
         plt.plot(path[:, 0], path[:, 1], "-r")
+        plt.plot(self.config.starting_location.x, self.config.starting_location.y, 'k*', ms=10)
+        plt.plot(self.config.ending_location.x, self.config.ending_location.y, 'g*', ms=10)
         plt.grid()
         plt.show()
 
 
 if __name__ == "__main__":
     starting_loc = Location(0, 0)
-    ending_loc = Location(.8, .5)
+    ending_loc = Location(1, 1)
     rrtconfig = RRTConfig(starting_location=starting_loc, ending_location=ending_loc, goal_sample_rate=GOAL_SAMPLE_RATE,
                           step=STEP)
     rrt = RRT(rrtconfig)
+    rrt.set_obstacles()
     rrt.expand_trees()
     rrt.get_shortest_path()
     rrt.plot_tree()
-
     pass
-
-#%%
-# import Point, Polygon
-from sympy import Point, Polygon
-
-# creating points using Point()
-p1, p2, p3, p4 = map(Point, [(0, 0), (1, 0), (5, 1), (0, 1)])
-p5, p6, p7 = map(Point, [(3, 2), (1, -1), (0, 2)])
-
-# creating polygons using Polygon()
-poly1 = Polygon(p1, p2, p3, p4)
-poly2 = Polygon(p5, p6, p7)
-
-# using intersection()
-isIntersection = poly1.intersection(poly2)
-
-print(isIntersection)
-#%%
-p1, p2, p3, p4 = map(Point, [(0, 0), (0, 1), (1, 1), (1, 0)])
-P1 = Polygon(p1, p2, p3, p4)
-p1, p2, p3, p4 = map(Point, [(2, 2), (3, 2), (3, 3), (2, 3)])
-P2 = Polygon(p1, p2, p3, p4)
-isIntersection = P1.intersection(P2)
-print(isIntersection)
-
-#%%
-
-import numpy as np
-import matplotlib.pyplot as plt
-import shapely.geometry
-
-# poly = shapely.geometry.Polygon()
-circle = shapely.geometry.Point(5.0, 0.0).buffer(10.0)
-clip_poly = shapely.geometry.Polygon([[-9.5, -2], [2, 2], [3, 4], [-1, 3]])
-clipped_shape = circle.difference(clip_poly)
-
-line = shapely.geometry.LineString([[-10, -5], [15, 5]])
-line2 = shapely.geometry.LineString([[-10, -5], [-5, 0], [2, 3]])
-print(line.intersects(clip_poly))
-
-print(line2.intersects(clip_poly))
-
-
-# print 'Blue line intersects clipped shape:', line.intersects(clipped_shape)
-# print 'Green line intersects clipped shape:', line2.intersects(clipped_shape)
-#
-# fig = plt.figure()
-# ax = fig.add_subplot(111)
-#
-# ax.plot(*np.array(line).T, color='blue', linewidth=3, solid_capstyle='round')
-# ax.plot(*np.array(line2).T, color='green', linewidth=3, solid_capstyle='round')
-# ax.add_patch(descartes.PolygonPatch(clipped_shape, fc='blue', alpha=0.5))
-# ax.axis('equal')
-#
-# plt.show()
-
 
 
 
