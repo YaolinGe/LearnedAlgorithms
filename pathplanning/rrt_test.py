@@ -9,15 +9,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 from shapely.geometry import Point, Polygon, LineString
 
-MAXNUM = 500
+MAXNUM = 5000
 XLIM = [0, 1]
 YLIM = [0, 1]
 GOAL_SAMPLE_RATE = .01
-STEP = .1
-DISTANCE_TOLERANCE = .05
-OBSTACLES = [[[.1, .1], [.2, .1], [.2, .2], [.1, .2]],
-             [[.4, .4], [.6, .5], [.5, .6], [.3, .4]],
-             [[.8, .8], [.95, .8], [.95, .95], [.8, .95]]]
+STEP = .02
+DISTANCE_TOLERANCE = .02
+# OBSTACLES = [[[.1, .1], [.2, .1], [.2, .2], [.1, .2]],
+#              [[.4, .4], [.6, .5], [.5, .6], [.3, .4]],
+#              [[.8, .8], [.95, .8], [.95, .95], [.8, .95]]]
+OBSTACLES = [[[.1, .0], [.2, .0], [.2, .5], [.1, .5]],
+             [[.0, .6], [.6, .6], [.6, 1.], [.0, 1.]],
+             [[.8, .0], [1., .0], [1., .9], [.8, .9]],
+             [[.3, .1], [.4, .1], [.4, .6], [.3, .6]],
+             [[.5, .0], [.6, .0], [.6, .4], [.5, .4]]]
+
 
 FIGPATH = "/Users/yaoling/OneDrive - NTNU/Self-improvements/LearnedAlgorithms/pathplanning/fig/rrt/"
 
@@ -175,6 +181,7 @@ class RRT:
         plt.plot(self.config.starting_location.x, self.config.starting_location.y, 'k*', ms=10)
         plt.plot(self.config.ending_location.x, self.config.ending_location.y, 'g*', ms=10)
         plt.grid()
+        plt.title('rrt')
         plt.show()
 
 

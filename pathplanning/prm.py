@@ -116,8 +116,7 @@ class PRM:
         y2 = p2.y
 
         for i in range(len(obsVec)):
-            obs = obsVec[i]
-
+            obs = obsVec[
             obs_xl = (obs.pose.position.x - obs.scale.x / 2) - 0.5
             obs_xr = (obs.pose.position.x + obs.scale.x / 2) + 0.5
             obs_yb = (obs.pose.position.y - obs.scale.y / 2) - 0.5
@@ -161,4 +160,15 @@ class PRM:
         for i in self.nodes:
             if i.node_id == node_id:
                 return i
+
+
+#%%
+
+
+
+
+
+
+
+
 

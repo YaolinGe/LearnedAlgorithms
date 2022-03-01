@@ -115,3 +115,20 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+#%%
+value = []
+for i in range(10000):
+    value.append(np.random.choice(10))
+
+plt.plot(value)
+plt.show()
+plt.hist(value)
+plt.show()
+
+
+
+
+
+

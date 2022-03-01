@@ -8,19 +8,73 @@ Date: 2022-02-22
 import numpy as np
 import matplotlib.pyplot as plt
 from shapely.geometry import Point, Polygon, LineString
+from scipy.spatial.distance import cdist
 
-MAXNUM = 1000
+MAXNUM = 500
 XLIM = [0, 1]
 YLIM = [0, 1]
-GOAL_SAMPLE_RATE = .01
-STEP = .05
-RADIUS_NEIGHBOUR = .1
-DISTANCE_TOLERANCE = .05
-OBSTACLES = [[[.1, .1], [.2, .1], [.2, .2], [.1, .2]],
-             [[.4, .4], [.6, .5], [.5, .6], [.3, .4]],
-             [[.8, .8], [.95, .8], [.95, .95], [.8, .95]]]
+GOAL_SAMPLE_RATE = .0001
+STEP = .1
+RADIUS_NEIGHBOUR = .15
+DISTANCE_TOLERANCE = .18
+# OBSTACLES = [[[.1, .1], [.2, .1], [.2, .2], [.1, .2]],
+#              [[.4, .4], [.6, .5], [.5, .6], [.3, .4]],
+#              [[.8, .8], [.95, .8], [.95, .95], [.8, .95]]]
+# OBSTACLES = [[[.1, .0], [.2, .0], [.2, .5], [.1, .5]],
+#              [[.0, .6], [.6, .6], [.6, 1.], [.0, 1.]],
+#              [[.8, .0], [1., .0], [1., .9], [.8, .9]],
+#              [[.3, .1], [.4, .1], [.4, .6], [.3, .6]],
+#              [[.5, .0], [.6, .0], [.6, .4], [.5, .4]]]
+OBSTACLES = [[[1.2, 1.2], [1.4, 1.2], [1.4, 1.4], [1.2, 1.4]]]
+
 
 FIGPATH = "/Users/yaoling/OneDrive - NTNU/Self-improvements/LearnedAlgorithms/pathplanning/fig/rrt_star/"
+
+
+class GP:
+
+    def __init__(self):
+        self.getGrid()
+        self.getMean()
+        self.getCov()
+
+        pass
+
+    def getGrid(self):
+        x = np.linspace(XLIM[0], XLIM[1], 40)
+        y = np.linspace(YLIM[0], YLIM[1], 40)
+        xx, yy = np.meshgrid(x, y)
+        xv = xx.reshape(-1, 1)
+        yv = yy.reshape(-1, 1)
+        self.grid = np.hstack((xv, yv))
+        pass
+
+    def getMean(self):
+        self.mu = 1 - np.exp(- ((self.grid[:, 0] - 1.) ** 2 + (self.grid[:, 1] - .5) ** 2))
+        pass
+
+    def getCov(self):
+        H = cdist(self.grid, self.grid)
+        self.Cov = .01 ** 2 * (1 + 4.5 / .2 * H) * np.exp(-4.5 / .2 * H)
+        pass
+
+    def getGroundTruth(self):
+        self.ground_truth = self.mu.reshape(-1, 1) + np.linalg.cholesky(self.Cov) @ np.random.randn(len(self.mu)).reshape(-1, 1)
+        plt.scatter(self.grid[:, 0], self.grid[:, 1], c=self.ground_truth, cmap="Paired", vmin=.0, vmax=1)
+        plt.colorbar()
+        plt.show()
+        pass
+
+    def getEIBV(self):
+        pass
+
+
+gp = GP()
+gp.getGroundTruth()
+
+
+
+
 
 
 class Location:
@@ -66,7 +120,7 @@ class RRTStar:
     def expand_trees(self):
         self.nodes.append(self.starting_node)
         for i in range(MAXNUM):
-            print(i)
+            # print(i)
             if np.random.rand() <= self.config.goal_sample_rate:
                 new_location = self.config.ending_location
             else:
@@ -74,6 +128,7 @@ class RRTStar:
 
             nearest_node = self.get_nearest_node(self.nodes, new_location)
             next_node = self.get_next_node(nearest_node, new_location)
+
             next_node, nearest_node = self.rewire_tree(next_node, nearest_node)
 
             if self.iscollided(next_node):
@@ -81,8 +136,8 @@ class RRTStar:
 
             if self.isarrived(next_node):
                 self.ending_node.parent = next_node
-                self.nodes.append(self.ending_node)
-                break
+                # self.nodes.append(self.ending_node)
+                # break
             else:
                 self.nodes.append(next_node)
             pass
@@ -120,6 +175,23 @@ class RRTStar:
         return nodes[dist.index(min(dist))]
 
     @staticmethod
+    def get_cost_from_field(location):
+        return 1 - np.exp(-((location.x - .5) ** 2 + (location.y - .5) ** 2) / .1)
+
+    @staticmethod
+    def get_cost_along_path(location1, location2):
+        N = 10
+        x = np.linspace(location1.x, location2.x, N)
+        y = np.linspace(location1.y, location2.y, N)
+        cost = []
+        for i in range(N):
+            cost.append(RRTStar.get_cost_from_field(Location(x[i], y[i])))
+        cost_total = np.trapz(cost) / N
+        # cost_total = np.sum(cost) / RRTStar.get_distance_between_nodes(TreeNode(location1), TreeNode(location2))
+        print("cost total: ", cost_total)
+        return cost_total
+
+    @staticmethod
     def get_distance_between_nodes(node1, node2):
         dist_x = node1.location.x - node2.location.x
         dist_y = node1.location.y - node2.location.y
@@ -127,21 +199,65 @@ class RRTStar:
         return dist
 
     def get_next_node(self, node, location):
-        angle = np.math.atan2(location.y - node.location.y, location.x - node.location.x)
-        x = node.location.x + self.config.step * np.cos(angle)
-        y = node.location.y + self.config.step * np.sin(angle)
-        location_next = Location(x, y)
+        node_temp = TreeNode(location)
+        if RRTStar.get_distance_between_nodes(node, node_temp) <= self.config.step:
+            return TreeNode(location, node)
+        else:
+            angle = np.math.atan2(location.y - node.location.y, location.x - node.location.x)
+            x = node.location.x + self.config.step * np.cos(angle)
+            y = node.location.y + self.config.step * np.sin(angle)
+            location_next = Location(x, y)
         return TreeNode(location_next, node)
 
-    def rewire_tree(self, node_new, node_nearest):
+    def rewire_tree(self, node_current, node_nearest):
+        ind_neighbour_nodes = self.get_neighbour_nodes(node_current)
+
+        for i in range(len(ind_neighbour_nodes)):
+            # print(i)
+            if self.nodes[ind_neighbour_nodes[i]].cost + \
+                    RRTStar.get_distance_between_nodes(self.nodes[ind_neighbour_nodes[i]], node_current) + \
+                    RRTStar.get_cost_along_path(self.nodes[ind_neighbour_nodes[i]].location, node_current.location) < \
+                    node_nearest.cost + \
+                    RRTStar.get_distance_between_nodes(node_nearest, node_current) + \
+                    RRTStar.get_cost_along_path(node_nearest.location, node_current.location):
+                node_nearest = self.nodes[ind_neighbour_nodes[i]]
+        node_current.cost = node_nearest.cost + \
+                            RRTStar.get_distance_between_nodes(node_nearest, node_current) + \
+                            RRTStar.get_cost_along_path(node_nearest.location, node_current.location)
+        node_current.parent = node_nearest
+
+        print("Distance: ", RRTStar.get_distance_between_nodes(node_nearest, node_current))
+        for i in range(len(ind_neighbour_nodes)):
+            # print(i)
+            cost_current_neighbour = node_current.cost + \
+                                     RRTStar.get_distance_between_nodes(node_current, self.nodes[ind_neighbour_nodes[i]]) + \
+                                     RRTStar.get_cost_along_path(node_current.location, self.nodes[ind_neighbour_nodes[i]].location)
+            if cost_current_neighbour < self.nodes[ind_neighbour_nodes[i]].cost:
+                self.nodes[ind_neighbour_nodes[i]].cost = cost_current_neighbour
+                self.nodes[ind_neighbour_nodes[i]].parent = node_current
+
+        return node_current, node_nearest
+        # for i in range(len(self.nodes)):
+            # distance_between_nodes = RRTStar.get_distance_between_nodes(self.nodes[i], node_current)
+
+
+            # if distance_between_nodes <= RADIUS_NEIGHBOUR:
+            #     if self.nodes[i].cost + distance_between_nodes < \
+            #             node_nearest.cost + RRTStar.get_distance_between_nodes(node_nearest, node_current):
+            #         node_nearest = self.nodes[i]
+        # node_current.cost = node_nearest.cost + RRTStar.get_distance_between_nodes(node_nearest, node_current)
+        # node_current.parent = node_nearest
+        # return node_current, node_nearest
+        pass
+
+    def get_neighbour_nodes(self, node_current):
+        distance_between_nodes = []
         for i in range(len(self.nodes)):
-            if RRTStar.get_distance_between_nodes(self.nodes[i], node_new) <= RADIUS_NEIGHBOUR:
-                if self.nodes[i].cost + RRTStar.get_distance_between_nodes(self.nodes[i], node_new) < \
-                        node_nearest.cost + RRTStar.get_distance_between_nodes(node_nearest, node_new):
-                    node_nearest = self.nodes[i]
-        node_new.cost = node_nearest.cost + RRTStar.get_distance_between_nodes(node_nearest, node_new)
-        node_new.parent = node_nearest
-        return node_new, node_nearest
+            distance_between_nodes.append(RRTStar.get_distance_between_nodes(self.nodes[i], node_current))
+        print(distance_between_nodes)
+        ind_neighbours = np.where(np.array(distance_between_nodes) <= RADIUS_NEIGHBOUR)[0]
+        print(ind_neighbours)
+        return ind_neighbours
 
     def isarrived(self, node):
         dist = self.get_distance_between_nodes(self.ending_node, node)
@@ -192,13 +308,15 @@ class RRTStar:
         plt.plot(path[:, 0], path[:, 1], "-r")
         plt.plot(self.config.starting_location.x, self.config.starting_location.y, 'k*', ms=10)
         plt.plot(self.config.ending_location.x, self.config.ending_location.y, 'g*', ms=10)
+
         plt.grid()
+        plt.title("rrt_star")
         plt.show()
 
 
 if __name__ == "__main__":
-    starting_loc = Location(0, 0)
-    ending_loc = Location(1, 1)
+    starting_loc = Location(0., 0.)
+    ending_loc = Location(.0, 1.)
     rrtconfig = RRTConfig(starting_location=starting_loc, ending_location=ending_loc, goal_sample_rate=GOAL_SAMPLE_RATE,
                           step=STEP)
     rrt = RRTStar(rrtconfig)
