@@ -9,6 +9,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from shapely.geometry import Point, Polygon, LineString
 from scipy.spatial.distance import cdist
+from scipy.stats import mvn
+
+
+#== GP kernel
+SIGMA = .08
+LATERAL_RANGE = .7
+NUGGET = .01
+np.random.seed(0)
+#==
+
 
 MAXNUM = 500
 XLIM = [0, 1]
@@ -25,7 +35,8 @@ DISTANCE_TOLERANCE = .18
 #              [[.8, .0], [1., .0], [1., .9], [.8, .9]],
 #              [[.3, .1], [.4, .1], [.4, .6], [.3, .6]],
 #              [[.5, .0], [.6, .0], [.6, .4], [.5, .4]]]
-OBSTACLES = [[[1.2, 1.2], [1.4, 1.2], [1.4, 1.4], [1.2, 1.4]]]
+# OBSTACLES = [[[1.2, 1.2], [1.4, 1.2], [1.4, 1.4], [1.2, 1.4]]]
+OBSTACLES = [[]]
 
 
 FIGPATH = "/Users/yaoling/OneDrive - NTNU/Self-improvements/LearnedAlgorithms/pathplanning/fig/rrt_star/"
@@ -37,6 +48,7 @@ class GP:
         self.getGrid()
         self.getMean()
         self.getCov()
+        self.getGroundTruth()
 
         pass
 
@@ -44,37 +56,62 @@ class GP:
         x = np.linspace(XLIM[0], XLIM[1], 40)
         y = np.linspace(YLIM[0], YLIM[1], 40)
         xx, yy = np.meshgrid(x, y)
-        xv = xx.reshape(-1, 1)
-        yv = yy.reshape(-1, 1)
-        self.grid = np.hstack((xv, yv))
+        self.grid_x = xx.reshape(-1, 1)
+        self.grid_y = yy.reshape(-1, 1)
+        self.grid = np.hstack((self.grid_x, self.grid_y))
         pass
 
+    def setCoef(self):
+        self.sigma = SIGMA
+        self.eta = 4.5 / LATERAL_RANGE
+        self.tau = NUGGET
+        self.R = np.diagflat(self.tau ** 2)
+
     def getMean(self):
-        self.mu = 1 - np.exp(- ((self.grid[:, 0] - 1.) ** 2 + (self.grid[:, 1] - .5) ** 2))
+        self.mu_prior = 1 - np.exp(- ((self.grid[:, 0] - 1.) ** 2 + (self.grid[:, 1] - .5) ** 2))
         pass
 
     def getCov(self):
-        H = cdist(self.grid, self.grid)
-        self.Cov = .01 ** 2 * (1 + 4.5 / .2 * H) * np.exp(-4.5 / .2 * H)
+        self.setCoef()
+        DistanceMatrix = cdist(self.grid, self.grid)
+        self.Sigma_prior = self.sigma ** 2 * (1 + self.eta * DistanceMatrix) * np.exp(-self.eta * DistanceMatrix)
         pass
 
     def getGroundTruth(self):
-        self.ground_truth = self.mu.reshape(-1, 1) + np.linalg.cholesky(self.Cov) @ np.random.randn(len(self.mu)).reshape(-1, 1)
-        plt.scatter(self.grid[:, 0], self.grid[:, 1], c=self.ground_truth, cmap="Paired", vmin=.0, vmax=1)
+        self.mu_truth = self.mu_prior.reshape(-1, 1) + np.linalg.cholesky(self.Sigma_prior) @ np.random.randn(len(self.mu_prior)).reshape(-1, 1)
+        plt.scatter(self.grid[:, 0], self.grid[:, 1], c=self.mu_truth, cmap="Paired", vmin=.0, vmax=1)
         plt.colorbar()
         plt.show()
         pass
 
-    def getEIBV(self):
-        pass
+    def getF(self, location):
+        x_loc = location.x.reshape(-1, 1)
+        y_loc = location.y.reshape(-1, 1)
 
+        DM_x = x_loc @ np.ones([1, len(self.grid_x)]) - np.ones([len(x_loc), 1]) @ self.grid_x
+        DM_y = y_loc @ np.ones([1, len(self.grid_y)]) - np.ones([len(y_loc), 1]) @ self.grid_y
+        DM = DM_x ** 2 + DM_y ** 2
+        ind_F = np.argmin(DM, axis = 1) # interpolated vectorised indices
+        F = np.zeros([1, len(self.grid_x)])
+        F[ind_F] = True
+        return F
 
-gp = GP()
-gp.getGroundTruth()
+    @staticmethod
+    def GPupd(mu, Sigma, F, R, measurement):
+        C = F @ Sigma @ F.T + R
+        mu = mu + Sigma @ F.T @ np.linalg.solve(C, (measurement - F @ mu))
+        Sigma = Sigma - Sigma @ F.T @ np.linalg.solve(C, F @ Sigma)
+        return mu, Sigma
 
-
-
-
+    @staticmethod
+    def getEIBV(mu, Sigma, F, R, threshold):
+        Sigma_updated = Sigma - Sigma @ F.T @ np.linalg.solve(F @ Sigma @ F.T + R, F @ Sigma)
+        Variance = np.diag(Sigma_updated).reshape(-1, 1)
+        EIBV = 0
+        for i in range(mu.shape[0]):
+            EIBV += (mvn.mvnun(-np.inf, threshold, mu[i], Variance[i])[0] -
+                     mvn.mvnun(-np.inf, threshold, mu[i], Variance[i])[0] ** 2)
+        return EIBV
 
 
 class Location:
@@ -87,10 +124,12 @@ class Location:
 
 class TreeNode:
 
-    def __init__(self, location=None, parent=None, cost=None):
+    def __init__(self, location=None, parent=None, cost=None, mu=None, Sigma=None):
         self.location = location
         self.parent = parent
         self.cost = cost
+        self.mu = mu
+        self.Sigma = Sigma
         pass
 
 
@@ -297,8 +336,11 @@ class RRTStar:
 
         plt.clf()
         for i in range(self.obstacles.shape[0]):
-            obstacle = np.append(self.obstacles[i], self.obstacles[i][0, :].reshape(1, -1), axis=0)
-            plt.plot(obstacle[:, 0], obstacle[:, 1], 'r-.')
+            if i > 0:
+                obstacle = np.append(self.obstacles[i], self.obstacles[i][0, :].reshape(1, -1), axis=0)
+                plt.plot(obstacle[:, 0], obstacle[:, 1], 'r-.')
+            else:
+                pass
 
         for node in self.nodes:
             if node.parent is not None:
