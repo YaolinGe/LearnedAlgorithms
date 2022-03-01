@@ -198,4 +198,17 @@ if __name__ == "__main__":
     pass
 
 
+#%%
+x = np.linspace(0, 1, 100)
+y = np.linspace(0, 1, 100)
+xx, yy = np.meshgrid(x, y)
+x = xx.reshape(-1, 1)
+y = yy.reshape(-1, 1)
+
+v = 1 - np.exp(-((x - .5) ** 2 + (y - .5) ** 2) / .9)
+plt.scatter(x, y, c=v, cmap='Paired')
+plt.colorbar()
+plt.show()
+
+
 

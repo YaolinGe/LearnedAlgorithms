@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 from shapely.geometry import Point, Polygon, LineString
 from scipy.spatial.distance import cdist
 from scipy.stats import mvn
+import time
+from scipy.interpolate import griddata
 
 
 #== GP kernel
@@ -17,16 +19,17 @@ SIGMA = .08
 LATERAL_RANGE = .7
 NUGGET = .01
 np.random.seed(0)
+THRESHOLD = .3
 #==
 
 
-MAXNUM = 500
+MAXNUM = 1000
 XLIM = [0, 1]
 YLIM = [0, 1]
-GOAL_SAMPLE_RATE = .0001
-STEP = .1
-RADIUS_NEIGHBOUR = .15
-DISTANCE_TOLERANCE = .18
+GOAL_SAMPLE_RATE = .01
+STEP = .15
+RADIUS_NEIGHBOUR = .2
+DISTANCE_TOLERANCE = .05
 # OBSTACLES = [[[.1, .1], [.2, .1], [.2, .2], [.1, .2]],
 #              [[.4, .4], [.6, .5], [.5, .6], [.3, .4]],
 #              [[.8, .8], [.95, .8], [.95, .95], [.8, .95]]]
@@ -41,24 +44,49 @@ OBSTACLES = [[]]
 
 FIGPATH = "/Users/yaoling/OneDrive - NTNU/Self-improvements/LearnedAlgorithms/pathplanning/fig/rrt_star/"
 
+def plotf(grid, values, title):
+    x = grid[:, 0]
+    y = grid[:, 1]
+    nx = 100
+    ny = 100
+    # plt.figure()
+    # plt.scatter(x, y, c=values, cmap="Paired")
+    # plt.colorbar()
+    # plt.title(title)
+    # plt.show()
 
-class GP:
+    xmin, ymin = map(np.amin, [x, y])
+    xmax, ymax = map(np.amax, [x, y])
+
+    xv = np.linspace(xmin, xmax, nx)
+    yv = np.linspace(ymin, ymax, ny)
+    grid_x, grid_y = np.meshgrid(xv, yv)
+
+    grid_values = griddata(grid, values, (grid_x, grid_y))
+    plt.figure()
+    plt.scatter(grid_x, grid_y, c=grid_values, cmap="Paired")
+    plt.colorbar()
+    plt.title(title)
+    plt.show()
+
+
+class GPKernel:
 
     def __init__(self):
         self.getGrid()
         self.getMean()
         self.getCov()
         self.getGroundTruth()
-
+        self.getEIBVField()
         pass
 
     def getGrid(self):
-        x = np.linspace(XLIM[0], XLIM[1], 40)
-        y = np.linspace(YLIM[0], YLIM[1], 40)
-        xx, yy = np.meshgrid(x, y)
-        self.grid_x = xx.reshape(-1, 1)
-        self.grid_y = yy.reshape(-1, 1)
-        self.grid = np.hstack((self.grid_x, self.grid_y))
+        x = np.linspace(XLIM[0], XLIM[1], 25)
+        y = np.linspace(YLIM[0], YLIM[1], 25)
+        self.x_matrix, self.y_matrix = np.meshgrid(x, y)
+        self.grid_x_vector = self.x_matrix.reshape(-1, 1)
+        self.grid_y_vector = self.y_matrix.reshape(-1, 1)
+        self.grid = np.hstack((self.grid_x_vector, self.grid_y_vector))
         pass
 
     def setCoef(self):
@@ -66,9 +94,20 @@ class GP:
         self.eta = 4.5 / LATERAL_RANGE
         self.tau = NUGGET
         self.R = np.diagflat(self.tau ** 2)
+        self.threshold = THRESHOLD
 
     def getMean(self):
-        self.mu_prior = 1 - np.exp(- ((self.grid[:, 0] - 1.) ** 2 + (self.grid[:, 1] - .5) ** 2))
+        self.mu_prior = (1 - np.exp(- ((self.grid[:, 0] - 1.) ** 2 + (self.grid[:, 1] - .5) ** 2))).reshape(-1, 1)
+        self.mu_prior_matrix = np.zeros_like(self.x_matrix)
+        for i in range(self.x_matrix.shape[0]):
+            for j in range(self.x_matrix.shape[1]):
+                self.mu_prior_matrix[i, j] = 1 - np.exp(- ((self.x_matrix[i, j] - 1.) ** 2 +
+                                                           (self.y_matrix[i, j] - .5) ** 2))
+        # plotf(self.grid, self.mu_prior, "Prior")
+        plt.imshow(self.mu_prior_matrix, cmap='Paired')
+        plt.colorbar()
+        plt.show()
+
         pass
 
     def getCov(self):
@@ -79,22 +118,20 @@ class GP:
 
     def getGroundTruth(self):
         self.mu_truth = self.mu_prior.reshape(-1, 1) + np.linalg.cholesky(self.Sigma_prior) @ np.random.randn(len(self.mu_prior)).reshape(-1, 1)
-        plt.scatter(self.grid[:, 0], self.grid[:, 1], c=self.mu_truth, cmap="Paired", vmin=.0, vmax=1)
-        plt.colorbar()
-        plt.show()
+        plotf(self.grid, self.mu_truth, "Truth")
         pass
 
     def getF(self, location):
-        x_loc = location.x.reshape(-1, 1)
-        y_loc = location.y.reshape(-1, 1)
+        x_loc = np.array(location.x).reshape(-1, 1)
+        y_loc = np.array(location.y).reshape(-1, 1)
 
-        DM_x = x_loc @ np.ones([1, len(self.grid_x)]) - np.ones([len(x_loc), 1]) @ self.grid_x
-        DM_y = y_loc @ np.ones([1, len(self.grid_y)]) - np.ones([len(y_loc), 1]) @ self.grid_y
+        DM_x = x_loc @ np.ones([1, len(self.grid_x_vector)]) - np.ones([len(x_loc), 1]) @ self.grid_x_vector.T
+        DM_y = y_loc @ np.ones([1, len(self.grid_y_vector)]) - np.ones([len(y_loc), 1]) @ self.grid_y_vector.T
         DM = DM_x ** 2 + DM_y ** 2
         ind_F = np.argmin(DM, axis = 1) # interpolated vectorised indices
-        F = np.zeros([1, len(self.grid_x)])
-        F[ind_F] = True
-        return F
+        # F = np.zeros([1, len(self.grid_x)])
+        # F[0, ind_F] = True
+        return ind_F
 
     @staticmethod
     def GPupd(mu, Sigma, F, R, measurement):
@@ -113,6 +150,24 @@ class GP:
                      mvn.mvnun(-np.inf, threshold, mu[i], Variance[i])[0] ** 2)
         return EIBV
 
+    def getEIBVField(self):
+        self.eibv = []
+        t1 = time.time()
+        for i in range(self.grid.shape[0]):
+            print(i)
+            F = np.zeros([1, self.grid.shape[0]])
+            F[0, i] = True
+            self.eibv.append(GPKernel.getEIBV(self.mu_prior, self.Sigma_prior, F, self.R, THRESHOLD))
+        self.eibv = np.array(self.eibv)
+        self.eibv -= np.amin(self.eibv)
+        t2 = time.time()
+        print("Time consumed: ", t2 - t1)
+        plotf(self.grid, self.eibv, "EIBV")
+        pass
+
+gp = GPKernel()
+
+#%%
 
 class Location:
 
@@ -124,22 +179,25 @@ class Location:
 
 class TreeNode:
 
-    def __init__(self, location=None, parent=None, cost=None, mu=None, Sigma=None):
+    def __init__(self, location=None, parent=None, cost=None, mu=None, Sigma=None, F=None, EIBV=None):
         self.location = location
         self.parent = parent
         self.cost = cost
         self.mu = mu
         self.Sigma = Sigma
+        self.F = F
+        self.EIBV = EIBV
         pass
 
 
 class RRTConfig:
 
-    def __init__(self, starting_location=None, ending_location=None, goal_sample_rate=None, step=None):
+    def __init__(self, starting_location=None, ending_location=None, goal_sample_rate=None, step=None, GPKernel=None):
         self.starting_location = starting_location
         self.ending_location = ending_location
         self.goal_sample_rate = goal_sample_rate
         self.step = step
+        self.GPKernel = GPKernel
         pass
 
 
@@ -152,14 +210,22 @@ class RRTStar:
     def __init__(self, config=None):
         self.config = config
         self.path = []
-        self.starting_node = TreeNode(self.config.starting_location, None, 0)
+        self.starting_node = TreeNode(self.config.starting_location, None, 0,
+                                      self.config.GPKernel.mu_prior, self.config.GPKernel.Sigma_prior)
         self.ending_node = TreeNode(self.config.ending_location, None, 0)
+        self.starting_node.EIBV = 0
+        self.setF(self.starting_node)
+        self.setF(self.ending_node)
         pass
+
+    def setF(self, node):
+        node.F = self.config.GPKernel.getF(node.location)
+        # print(node.F)
 
     def expand_trees(self):
         self.nodes.append(self.starting_node)
         for i in range(MAXNUM):
-            # print(i)
+            print(i)
             if np.random.rand() <= self.config.goal_sample_rate:
                 new_location = self.config.ending_location
             else:
@@ -170,8 +236,8 @@ class RRTStar:
 
             next_node, nearest_node = self.rewire_tree(next_node, nearest_node)
 
-            if self.iscollided(next_node):
-                continue
+            # if self.iscollided(next_node):
+            #     continue
 
             if self.isarrived(next_node):
                 self.ending_node.parent = next_node
@@ -215,7 +281,8 @@ class RRTStar:
 
     @staticmethod
     def get_cost_from_field(location):
-        return 1 - np.exp(-((location.x - .5) ** 2 + (location.y - .5) ** 2) / .1)
+        # return 0
+        return 2**2 * np.exp(-((location.x - .5) ** 2 + (location.y - .5) ** 2) / .09)
 
     @staticmethod
     def get_cost_along_path(location1, location2):
@@ -227,7 +294,7 @@ class RRTStar:
             cost.append(RRTStar.get_cost_from_field(Location(x[i], y[i])))
         cost_total = np.trapz(cost) / N
         # cost_total = np.sum(cost) / RRTStar.get_distance_between_nodes(TreeNode(location1), TreeNode(location2))
-        print("cost total: ", cost_total)
+        # print("cost total: ", cost_total)
         return cost_total
 
     @staticmethod
@@ -252,25 +319,14 @@ class RRTStar:
         ind_neighbour_nodes = self.get_neighbour_nodes(node_current)
 
         for i in range(len(ind_neighbour_nodes)):
-            # print(i)
-            if self.nodes[ind_neighbour_nodes[i]].cost + \
-                    RRTStar.get_distance_between_nodes(self.nodes[ind_neighbour_nodes[i]], node_current) + \
-                    RRTStar.get_cost_along_path(self.nodes[ind_neighbour_nodes[i]].location, node_current.location) < \
-                    node_nearest.cost + \
-                    RRTStar.get_distance_between_nodes(node_nearest, node_current) + \
-                    RRTStar.get_cost_along_path(node_nearest.location, node_current.location):
+            if self.get_cost_between_nodes(self.nodes[ind_neighbour_nodes[i]], node_current) < \
+                    self.get_cost_between_nodes(node_nearest, node_current):
                 node_nearest = self.nodes[ind_neighbour_nodes[i]]
-        node_current.cost = node_nearest.cost + \
-                            RRTStar.get_distance_between_nodes(node_nearest, node_current) + \
-                            RRTStar.get_cost_along_path(node_nearest.location, node_current.location)
+        node_current.cost = self.get_cost_between_nodes(node_nearest, node_current)
         node_current.parent = node_nearest
 
-        print("Distance: ", RRTStar.get_distance_between_nodes(node_nearest, node_current))
         for i in range(len(ind_neighbour_nodes)):
-            # print(i)
-            cost_current_neighbour = node_current.cost + \
-                                     RRTStar.get_distance_between_nodes(node_current, self.nodes[ind_neighbour_nodes[i]]) + \
-                                     RRTStar.get_cost_along_path(node_current.location, self.nodes[ind_neighbour_nodes[i]].location)
+            cost_current_neighbour = self.get_cost_between_nodes(node_current, self.nodes[ind_neighbour_nodes[i]])
             if cost_current_neighbour < self.nodes[ind_neighbour_nodes[i]].cost:
                 self.nodes[ind_neighbour_nodes[i]].cost = cost_current_neighbour
                 self.nodes[ind_neighbour_nodes[i]].parent = node_current
@@ -278,7 +334,6 @@ class RRTStar:
         return node_current, node_nearest
         # for i in range(len(self.nodes)):
             # distance_between_nodes = RRTStar.get_distance_between_nodes(self.nodes[i], node_current)
-
 
             # if distance_between_nodes <= RADIUS_NEIGHBOUR:
             #     if self.nodes[i].cost + distance_between_nodes < \
@@ -289,13 +344,29 @@ class RRTStar:
         # return node_current, node_nearest
         pass
 
+    def get_cost_between_nodes(self, node1, node2):
+        cost = node1.cost + RRTStar.get_distance_between_nodes(node1, node2) + \
+               self.get_reward_between_nodes(node1, node2)
+               # RRTStar.get_cost_along_path(node1.location, node2.location)
+
+        print("Cost: ", cost)
+        return cost
+
+    def get_reward_between_nodes(self, node1, node2):
+        self.setF(node2)
+        node1.EIBV = self.get_eibv_for_node(node1)
+        node2.EIBV = self.get_eibv_for_node(node2)
+        reward = (node1.EIBV + node2.EIBV) / 2 * RRTStar.get_distance_between_nodes(node1, node2)
+        return reward
+
+    def get_eibv_for_node(self, node):
+        return self.config.GPKernel.eibv[node.F]
+
     def get_neighbour_nodes(self, node_current):
         distance_between_nodes = []
         for i in range(len(self.nodes)):
             distance_between_nodes.append(RRTStar.get_distance_between_nodes(self.nodes[i], node_current))
-        print(distance_between_nodes)
         ind_neighbours = np.where(np.array(distance_between_nodes) <= RADIUS_NEIGHBOUR)[0]
-        print(ind_neighbours)
         return ind_neighbours
 
     def isarrived(self, node):
@@ -357,10 +428,11 @@ class RRTStar:
 
 
 if __name__ == "__main__":
-    starting_loc = Location(0., 0.)
-    ending_loc = Location(.0, 1.)
+    starting_loc = Location(.0, .0)
+    ending_loc = Location(.0, .99)
+    # gp = GPKernel()
     rrtconfig = RRTConfig(starting_location=starting_loc, ending_location=ending_loc, goal_sample_rate=GOAL_SAMPLE_RATE,
-                          step=STEP)
+                          step=STEP, GPKernel=gp)
     rrt = RRTStar(rrtconfig)
     rrt.set_obstacles()
     rrt.expand_trees()
