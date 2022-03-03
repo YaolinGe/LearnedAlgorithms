@@ -13,6 +13,7 @@ from scipy.stats import mvn
 import time
 from scipy.interpolate import griddata
 from matplotlib.gridspec import GridSpec
+from matplotlib.cm import get_cmap
 
 
 #== GP kernel
@@ -25,6 +26,8 @@ THRESHOLD = .6
 
 
 NUM_STEPS = 40
+BUDGET = 20
+
 MAXNUM = 300
 XLIM = [0, 1]
 YLIM = [0, 1]
@@ -49,7 +52,7 @@ OBSTACLES = [[]]
 FIGPATH = "/Users/yaoling/OneDrive - NTNU/Self-improvements/LearnedAlgorithms/pathplanning/fig/rrt_star/"
 
 
-def plotf_vector(grid, values, title, alpha=None):
+def plotf_vector(grid, values, title, alpha=None, cmap="Paired"):
     x = grid[:, 0]
     y = grid[:, 1]
     nx = 100
@@ -64,7 +67,7 @@ def plotf_vector(grid, values, title, alpha=None):
 
     grid_values = griddata(grid, values, (grid_x, grid_y))
     # plt.figure()
-    plt.scatter(grid_x, grid_y, c=grid_values, cmap="Paired", alpha=alpha)
+    plt.scatter(grid_x, grid_y, c=grid_values, cmap=cmap, alpha=alpha)
     plt.colorbar()
     plt.title(title)
     # plt.show()
@@ -245,12 +248,16 @@ class TreeNode:
 
 class RRTConfig:
 
-    def __init__(self, starting_location=None, ending_location=None, goal_sample_rate=None, step=None, GPKernel=None):
+    def __init__(self, starting_location=None, ending_location=None,
+                 goal_sample_rate=None, step=None, GPKernel=None,
+                 budget=None, goal_location=None):
         self.starting_location = starting_location
         self.ending_location = ending_location
         self.goal_sample_rate = goal_sample_rate
         self.step = step
         self.GPKernel = GPKernel
+        self.budget = budget
+        self.goal_location = goal_location
         pass
 
 
@@ -397,6 +404,43 @@ class RRTStar:
         ind_neighbours = np.where(np.array(distance_between_nodes) <= RADIUS_NEIGHBOUR)[0]
         return ind_neighbours
 
+
+    def get_cost_between_nodes(self, node1, node2):
+        cost = (node1.cost +
+                self.get_distance_between_nodes(node1, node2) +
+                self.get_reward_between_nodes(node1, node2) +
+                self.get_cost_according_to_budget(node1, node2))
+               # RRTStar.get_cost_along_path(node1.location, node2.location)
+        # print("Cost: ", cost)
+        return cost
+
+    def get_reward_between_nodes(self, node1, node2):
+        self.setF(node2)
+        node1.EIBV = self.get_eibv_for_node(node1)
+        node2.EIBV = self.get_eibv_for_node(node2)
+        reward = (node1.EIBV + node2.EIBV) / 2 * RRTStar.get_distance_between_nodes(node1, node2)
+        return reward
+
+    def get_eibv_for_node(self, node):
+        return self.config.GPKernel.eibv[node.F]
+
+    def get_cost_according_to_budget(self, node1, node2):
+
+        cost1 = self.get_cost_from_budget_field(node1.location)
+        cost2 = self.get_cost_from_budget_field(node2.location)
+
+        cost_total = (cost1 + cost2) / 2 * RRTStar.get_distance_between_nodes(node1, node2)
+        return cost_total
+
+    def get_cost_from_budget_field(self, location):
+        dist = np.sqrt((location.x - self.config.goal_location.x) ** 2 +
+                       (location.y - self.config.goal_location.y) ** 2)
+        if dist <= self.config.budget:
+            return 0
+        else:
+            # print("Out of budget")
+            return 1
+
     @staticmethod
     def get_cost_along_path(location1, location2):
         N = 10
@@ -415,22 +459,6 @@ class RRTStar:
         # return 0
         return 2**2 * np.exp(-((location.x - .5) ** 2 + (location.y - .5) ** 2) / .09)
 
-    def get_cost_between_nodes(self, node1, node2):
-        cost = node1.cost + RRTStar.get_distance_between_nodes(node1, node2) + \
-               self.get_reward_between_nodes(node1, node2)
-               # RRTStar.get_cost_along_path(node1.location, node2.location)
-        # print("Cost: ", cost)
-        return cost
-
-    def get_reward_between_nodes(self, node1, node2):
-        self.setF(node2)
-        node1.EIBV = self.get_eibv_for_node(node1)
-        node2.EIBV = self.get_eibv_for_node(node2)
-        reward = (node1.EIBV + node2.EIBV) / 2 * RRTStar.get_distance_between_nodes(node1, node2)
-        return reward
-
-    def get_eibv_for_node(self, node):
-        return self.config.GPKernel.eibv[node.F]
 
     def isarrived(self, node):
         dist = self.get_distance_between_nodes(self.ending_node, node)
@@ -513,6 +541,7 @@ class GOOGLE:
         self.gp.getEIBVField()
 
         starting_loc = Location(.0, .0)
+        goal_loc = Location(.0, 1.)
 
         ind_min_eibv = np.argmin(self.gp.eibv)
         ending_loc = Location(self.gp.grid_vector[ind_min_eibv, 0], self.gp.grid_vector[ind_min_eibv, 1])
@@ -524,16 +553,27 @@ class GOOGLE:
         # plotf_vector(self.gp.grid_vector, self.gp.mu_prior_vector, "Prior")
         # plt.show()
 
+        budget = BUDGET
+        distance_travelled = 0
+        current_starting_loc = starting_loc
+
+
         for i in range(NUM_STEPS):
             print("Step: ", i)
             rrtconfig = RRTConfig(starting_location=starting_loc, ending_location=ending_loc,
-                                  goal_sample_rate=GOAL_SAMPLE_RATE, step=STEP, GPKernel=self.gp)
+                                  goal_sample_rate=GOAL_SAMPLE_RATE, step=STEP, GPKernel=self.gp,
+                                  budget=budget, goal_location=goal_loc)
             self.rrt = RRTStar(rrtconfig)
             self.rrt.expand_trees()
             self.rrt.get_shortest_path()
             path = self.rrt.path
 
             next_starting_loc = path[-2, :]
+            distance_travelled = np.sqrt((current_starting_loc.x - next_starting_loc[0]) ** 2 +
+                                          (current_starting_loc.y - next_starting_loc[1]) ** 2)
+
+            budget = budget - distance_travelled
+            print("Budget left: ", budget)
 
             ind_F = self.gp.getIndF(next_starting_loc[0], next_starting_loc[1])
             F = np.zeros([1, self.gp.grid_vector.shape[0]])
@@ -557,17 +597,18 @@ class GOOGLE:
             fig = plt.figure(figsize=(20, 5))
             gs = GridSpec(nrows=1, ncols=4)
             ax = fig.add_subplot(gs[0])
-            plotf_vector(self.gp.grid_vector, self.gp.mu_truth, "Ground Truth")
+            cmap = get_cmap("RdBu", 10)
+            plotf_vector(self.gp.grid_vector, self.gp.mu_truth, "Ground Truth", cmap=cmap)
 
             ax = fig.add_subplot(gs[1])
-            plotf_vector(self.gp.grid_vector, self.gp.mu_cond, "Conditional Mean")
+            plotf_vector(self.gp.grid_vector, self.gp.mu_cond, "Conditional Mean", cmap=cmap)
 
             ax = fig.add_subplot(gs[2])
-            plotf_vector(self.gp.grid_vector, np.sqrt(np.diag(self.gp.Sigma_cond)), "Prediction Error")
+            plotf_vector(self.gp.grid_vector, np.sqrt(np.diag(self.gp.Sigma_cond)), "Prediction Error", cmap=cmap)
 
             ax = fig.add_subplot(gs[3])
             self.rrt.plot_tree()
-            plotf_vector(self.gp.grid_vector, self.gp.eibv, "EIBV cost valley", alpha=.1)
+            plotf_vector(self.gp.grid_vector, self.gp.eibv, "EIBV + Budget cost valley", alpha=.1, cmap=cmap)
 
             # plt.show()
             plt.savefig(FIGPATH + "P_{:03d}.png".format(i))
