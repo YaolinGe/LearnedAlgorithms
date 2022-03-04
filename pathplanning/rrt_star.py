@@ -25,8 +25,8 @@ THRESHOLD = .6
 #==
 
 
-NUM_STEPS = 40
-BUDGET = 20
+NUM_STEPS = 50
+BUDGET = 7
 
 MAXNUM = 300
 XLIM = [0, 1]
@@ -68,9 +68,26 @@ def plotf_vector(grid, values, title, alpha=None, cmap="Paired"):
     grid_values = griddata(grid, values, (grid_x, grid_y))
     # plt.figure()
     plt.scatter(grid_x, grid_y, c=grid_values, cmap=cmap, alpha=alpha)
+    plt.xlim(XLIM)
+    plt.ylim(YLIM)
     plt.colorbar()
     plt.title(title)
     # plt.show()
+
+
+def plotf_budget_radar(centre, radius):
+    plt.plot(centre[0], centre[1], 'yp')
+    radar = plt.Circle((centre[0], centre[1]), radius, color='b', fill=False)
+    plt.gca().add_patch(radar)
+    if radius >= 1:
+        plt.xlim([radius * XLIM[0], radius * XLIM[1]])
+        plt.ylim([radius * YLIM[0], radius * YLIM[1]])
+
+
+def plotf_trajectory(trajectory):
+    trajectory = np.array(trajectory)
+    plt.plot(trajectory[:, 0], trajectory[:, 1], 'k.-')
+    plt.plot(trajectory[:, 0], trajectory[:, 1], 'k-')
 
 
 def plotf_matrix(values, title):
@@ -197,7 +214,13 @@ class GPKernel:
         t2 = time.time()
         print("EIBV field time consumed: ", t2 - t1)
         # plotf_vector(self.grid_vector, self.eibv, "EIBV")
-        pass
+
+    def getBudgetField(self, goal):
+        t1 = time.time()
+        self.budget_field = np.sqrt((self.grid_vector[:, 0] - goal.x) ** 2 +
+                                    (self.grid_vector[:, 1] - goal.y) ** 2)
+        t2 = time.time()
+        print("Budget field time consumed: ", t2 - t1)
 
     def getVRField(self):
         self.vr = np.zeros_like(self.x_matrix)
@@ -380,19 +403,7 @@ class RRTStar:
             if cost_current_neighbour < self.nodes[ind_neighbour_nodes[i]].cost:
                 self.nodes[ind_neighbour_nodes[i]].cost = cost_current_neighbour
                 self.nodes[ind_neighbour_nodes[i]].parent = node_current
-
         return node_current, node_nearest
-        # for i in range(len(self.nodes)):
-            # distance_between_nodes = RRTStar.get_distance_between_nodes(self.nodes[i], node_current)
-
-            # if distance_between_nodes <= RADIUS_NEIGHBOUR:
-            #     if self.nodes[i].cost + distance_between_nodes < \
-            #             node_nearest.cost + RRTStar.get_distance_between_nodes(node_nearest, node_current):
-            #         node_nearest = self.nodes[i]
-        # node_current.cost = node_nearest.cost + RRTStar.get_distance_between_nodes(node_nearest, node_current)
-        # node_current.parent = node_nearest
-        # return node_current, node_nearest
-        pass
 
     def get_neighbour_nodes(self, node_current):
         distance_between_nodes = []
@@ -403,7 +414,6 @@ class RRTStar:
                 distance_between_nodes.append(RRTStar.get_distance_between_nodes(self.nodes[i], node_current))
         ind_neighbours = np.where(np.array(distance_between_nodes) <= RADIUS_NEIGHBOUR)[0]
         return ind_neighbours
-
 
     def get_cost_between_nodes(self, node1, node2):
         cost = (node1.cost +
@@ -425,21 +435,23 @@ class RRTStar:
         return self.config.GPKernel.eibv[node.F]
 
     def get_cost_according_to_budget(self, node1, node2):
-
-        cost1 = self.get_cost_from_budget_field(node1.location)
-        cost2 = self.get_cost_from_budget_field(node2.location)
-
-        cost_total = (cost1 + cost2) / 2 * RRTStar.get_distance_between_nodes(node1, node2)
+        N = 10
+        x = np.linspace(node1.location.x, node2.location.x, N)
+        y = np.linspace(node1.location.y, node2.location.y, N)
+        cost = []
+        for i in range(N):
+            cost.append(self.get_cost_from_budget_field(Location(x[i], y[i])))
+        cost_total = np.trapz(cost) / N
+        # print("Cost total: ", cost_total)
+        # cost1 = self.get_cost_from_budget_field(node1.location)
+        # cost2 = self.get_cost_from_budget_field(node2.location)
+        # cost_total = (cost1 + cost2) / 2 * RRTStar.get_distance_between_nodes(node1, node2)
         return cost_total
 
     def get_cost_from_budget_field(self, location):
         dist = np.sqrt((location.x - self.config.goal_location.x) ** 2 +
                        (location.y - self.config.goal_location.y) ** 2)
-        if dist <= self.config.budget:
-            return 0
-        else:
-            # print("Out of budget")
-            return 1
+        return dist
 
     @staticmethod
     def get_cost_along_path(location1, location2):
@@ -532,7 +544,7 @@ class RRTStar:
 class GOOGLE:
 
     def __init__(self):
-
+        self.trajectory = []
         pass
 
     def pathplanner(self):
@@ -540,11 +552,12 @@ class GOOGLE:
         self.gp.setup()
         self.gp.getEIBVField()
 
-        starting_loc = Location(.0, .0)
-        goal_loc = Location(.0, 1.)
+        starting_loc = Location(1., .0)
+        goal_loc = Location(.0, .0)
+        self.gp.getBudgetField(goal_loc)
 
-        ind_min_eibv = np.argmin(self.gp.eibv)
-        ending_loc = Location(self.gp.grid_vector[ind_min_eibv, 0], self.gp.grid_vector[ind_min_eibv, 1])
+        ind_min_cost = np.argmin(self.gp.eibv)
+        ending_loc = Location(self.gp.grid_vector[ind_min_cost, 0], self.gp.grid_vector[ind_min_cost, 1])
         # ending_loc = Location(.0, 1.)
 
         # plotf_vector(self.gp.grid_vector, self.gp.mu_truth, "Truth")
@@ -555,11 +568,15 @@ class GOOGLE:
 
         budget = BUDGET
         distance_travelled = 0
-        current_starting_loc = starting_loc
+        current_loc = [starting_loc.x, starting_loc.y]
+        self.trajectory.append([starting_loc.x, starting_loc.y])
 
+        print("Total budget: ", budget)
 
         for i in range(NUM_STEPS):
             print("Step: ", i)
+
+            # == path planning ==
             rrtconfig = RRTConfig(starting_location=starting_loc, ending_location=ending_loc,
                                   goal_sample_rate=GOAL_SAMPLE_RATE, step=STEP, GPKernel=self.gp,
                                   budget=budget, goal_location=goal_loc)
@@ -568,32 +585,8 @@ class GOOGLE:
             self.rrt.get_shortest_path()
             path = self.rrt.path
 
-            next_starting_loc = path[-2, :]
-            distance_travelled = np.sqrt((current_starting_loc.x - next_starting_loc[0]) ** 2 +
-                                          (current_starting_loc.y - next_starting_loc[1]) ** 2)
 
-            budget = budget - distance_travelled
-            print("Budget left: ", budget)
-
-            ind_F = self.gp.getIndF(next_starting_loc[0], next_starting_loc[1])
-            F = np.zeros([1, self.gp.grid_vector.shape[0]])
-            F[0, ind_F] = True
-            self.gp.mu_cond, self.gp.Sigma_cond = self.gp.GPupd(self.gp.mu_cond, self.gp.Sigma_cond, F,
-                                                                self.gp.R, F @ self.gp.mu_truth)
-            self.gp.getEIBVField()
-
-            starting_loc = Location(next_starting_loc[0], next_starting_loc[1])
-            node_start = TreeNode(starting_loc)
-            node_end = TreeNode(ending_loc)
-            if RRTStar.get_distance_between_nodes(node_start, node_end) < DISTANCE_TOLERANCE:
-                print("Arrived")
-
-            ind_min_eibv = np.argmin(self.gp.eibv)
-            ending_loc = Location(self.gp.grid_vector[ind_min_eibv, 0], self.gp.grid_vector[ind_min_eibv, 1])
-
-            #     starting_loc = Location(.0, 1.)
-            #     ending_loc = Location(1., 1.)
-
+            # == plotting ==
             fig = plt.figure(figsize=(20, 5))
             gs = GridSpec(nrows=1, ncols=4)
             ax = fig.add_subplot(gs[0])
@@ -602,17 +595,51 @@ class GOOGLE:
 
             ax = fig.add_subplot(gs[1])
             plotf_vector(self.gp.grid_vector, self.gp.mu_cond, "Conditional Mean", cmap=cmap)
+            plotf_trajectory(self.trajectory)
 
             ax = fig.add_subplot(gs[2])
             plotf_vector(self.gp.grid_vector, np.sqrt(np.diag(self.gp.Sigma_cond)), "Prediction Error", cmap=cmap)
+            plotf_trajectory(self.trajectory)
 
             ax = fig.add_subplot(gs[3])
             self.rrt.plot_tree()
-            plotf_vector(self.gp.grid_vector, self.gp.eibv, "EIBV + Budget cost valley", alpha=.1, cmap=cmap)
-
+            plotf_vector(self.gp.grid_vector, .6 * self.gp.eibv + .45 * self.gp.budget_field, "EIBV cost valley + Budget Radar", alpha=.1, cmap=cmap)
+            plotf_budget_radar([goal_loc.x, goal_loc.y], budget)
             # plt.show()
             plt.savefig(FIGPATH + "P_{:03d}.png".format(i))
             plt.close("all")
+            # == end plotting ==
+
+
+            next_loc = path[-2, :]
+            self.trajectory.append(next_loc)
+            distance_travelled = np.sqrt((current_loc[0] - next_loc[0]) ** 2 +
+                                         (current_loc[1] - next_loc[1]) ** 2)
+            current_loc = next_loc
+
+            budget = budget - distance_travelled
+            print("Budget left: ", budget)
+
+            ind_F = self.gp.getIndF(next_loc[0], next_loc[1])
+            F = np.zeros([1, self.gp.grid_vector.shape[0]])
+            F[0, ind_F] = True
+            self.gp.mu_cond, self.gp.Sigma_cond = self.gp.GPupd(self.gp.mu_cond, self.gp.Sigma_cond, F,
+                                                                self.gp.R, F @ self.gp.mu_truth)
+            self.gp.getEIBVField()
+            self.gp.getBudgetField(goal_loc)
+
+            starting_loc = Location(next_loc[0], next_loc[1])
+            node_start = TreeNode(starting_loc)
+            node_end = TreeNode(ending_loc)
+            if RRTStar.get_distance_between_nodes(node_start, node_end) < DISTANCE_TOLERANCE:
+                print("Arrived")
+
+            ind_min_cost = np.argmin(.6 * self.gp.eibv + .45 * self.gp.budget_field)
+            ending_loc = Location(self.gp.grid_vector[ind_min_cost, 0], self.gp.grid_vector[ind_min_cost, 1])
+
+            #     starting_loc = Location(.0, 1.)
+            #     ending_loc = Location(1., 1.)
+
 
         pass
 
@@ -635,6 +662,11 @@ if __name__ == "__main__":
     pass
 
 
+#%%
+cmap = get_cmap("RdBu", 10)
 
+plt.scatter(g.gp.grid_vector[:, 0], g.gp.grid_vector[:, 1], c=g.gp.budget_field, cmap=cmap)
+plt.colorbar()
+plt.show()
 
 
